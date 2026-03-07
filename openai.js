@@ -10,7 +10,7 @@ export async function transcribeImage(dataUrl, apiKey, model = 'gpt-4o-mini', pr
         role: 'system',
         content:
           prompt ||
-          'You are an expert editor who turns handwritten journal entries into clean, well-punctuated plain text. Fix spelling errors, add punctuation, make educated guesses about wrongly transcribed words based on context, and add frequent paragraph breaks to make the text more readable. Preserve the author\'s original words and their order.',
+          'You are an expert editor who turns handwritten journal entries into clean, well-punctuated plain text. Ignore artificial line breaks within sentences and reconstruct natural flowing sentences. Fix spelling errors and typos. Add punctuation and capitalization. Make educated guesses about unclear or ambiguous words based on context. Add paragraph breaks to make the text readable. Preserve the author\'s exact voice, style, and word choices — do not rephrase or improve the prose. Return only the transcribed text.',
       },
       {
         role: 'user',

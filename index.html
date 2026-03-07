@@ -134,13 +134,11 @@
       </label>
       <label>
         System Prompt
-        <textarea id="promptInput" rows="6">You are an expert editor who turns handwritten or badly transcribed journal entries into clean, well-punctuated plain text. 
+        <textarea id="promptInput" rows="8">You are an expert editor who turns handwritten journal entries into clean, well-punctuated plain text.
 
-You fix spelling errors, add punctuation, and make educated guesses about wrongly transcribed words based on context. 
+Ignore artificial line breaks within sentences and reconstruct natural flowing sentences. Fix spelling errors and typos. Add punctuation and capitalization. Make educated guesses about unclear or ambiguous words based on context. Add paragraph breaks to make the text readable.
 
-You add frequent paragraph breaks to make the block text more readable. 
-
-At the same time, you preserve the author's original words and the order of those words.</textarea>
+Preserve the author's exact voice, style, and word choices — do not rephrase or improve the prose. Return only the transcribed text.</textarea>
       </label>
       <div class="settings-section">
         <h3>Cost Optimization</h3>
@@ -156,36 +154,6 @@ At the same time, you preserve the author's original words and the order of thos
             <option value="2000">2000 tokens (Detailed)</option>
           </select>
         </label>
-      </div>
-      <div class="settings-section">
-        <h3>Export Options</h3>
-        <button id="exportAllBtn" type="button" class="btn btn-secondary btn-full-width">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
-            <polyline points="14,2 14,8 20,8"/>
-            <line x1="16" y1="13" x2="8" y2="13"/>
-            <line x1="16" y1="17" x2="8" y2="17"/>
-            <line x1="10" y1="9" x2="8" y2="9"/>
-          </svg>
-          Export All Transcripts as TXT
-        </button>
-        <button id="exportDbBtn" type="button" class="btn btn-secondary btn-full-width">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7,10 12,15 17,10"/>
-            <line x1="12" y1="15" x2="12" y2="3"/>
-          </svg>
-          Export Database (for migration)
-        </button>
-        <button id="importDbBtn" type="button" class="btn btn-secondary btn-full-width">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-            <polyline points="7,10 12,5 17,10"/>
-            <line x1="12" y1="3" x2="12" y2="15"/>
-          </svg>
-          Import Database (from backup)
-        </button>
-        <input type="file" id="importDbInput" accept=".json" hidden />
       </div>
       <menu>
         <button type="submit" class="btn btn-primary">Save</button>

@@ -1,7 +1,6 @@
 import { loadPdfAsImages } from './pdf_renderer.js';
 import { getConfig, saveConfig, clearApiKey } from './storage.js';
 import { transcribeImage } from './openai.js';
-import { saveProject, getAllProjects, exportDb, importDb } from './db.js';
 import { exportTxt } from './exporter.js';
 
 const fileInput = document.getElementById('fileInput');
@@ -47,12 +46,8 @@ const modelInput = document.getElementById('modelInput');
 const promptInput = document.getElementById('promptInput');
 const resetKeyBtn = document.getElementById('resetKeyBtn');
 const closeSettingsBtn = document.getElementById('closeSettingsBtn');
-const exportAllBtn = document.getElementById('exportAllBtn');
 const compressImagesCheckbox = document.getElementById('compressImagesCheckbox');
 const maxTokensSelect = document.getElementById('maxTokensSelect');
-const exportDbBtn = document.getElementById('exportDbBtn');
-const importDbBtn = document.getElementById('importDbBtn');
-const importDbInput = document.getElementById('importDbInput');
 
 // Paste text modal elements
 const pasteTextModal = document.getElementById('pasteTextModal');
@@ -62,7 +57,7 @@ const cancelPasteBtn = document.getElementById('cancelPasteBtn');
 const processPasteBtn = document.getElementById('processPasteBtn');
 
 let state = {
-  project: null, // { id, title, createdAt, pages: [...] }
+  project: null, // { title, pages: [...] }
   currentPageIndex: 0,
   currentView: 'image', // 'image' or 'transcript'
   autoTranscribeDisabled: false,
@@ -152,14 +147,10 @@ async function handlePastedText(text) {
 
     state.isTextOnly = true;
 
-    const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
     state.project = {
-      title: `Pasted Text ${timestamp}`,
-      createdAt: Date.now(),
+      title: `Pasted Text`,
       pages: pagesData,
     };
-
-    await saveProject(state.project);
 
     state.currentPageIndex = 0;
     updatePageNavigation();
@@ -220,11 +211,8 @@ async function handleFiles(files) {
 
     state.project = {
       title: file.name,
-      createdAt: Date.now(),
       pages: pagesData,
     };
-
-    await saveProject(state.project);
 
     hideStatus();
     updateUIForFileType();
@@ -246,7 +234,7 @@ function splitTextIntoPages(text, wordsPerPage = 500) {
     pages.push(pageWords.join(' '));
   }
 
-  return pages.length > 0 ? pages : [text]; // Fallback to single page if splitting fails
+  return pages.length > 0 ? pages : [text];
 }
 
 function updateUIForFileType() {
@@ -317,8 +305,6 @@ async function transcribeCurrentPage() {
     page.status = 'done';
     transcriptArea.value = text;
 
-    await saveProject(state.project);
-
     hideStatus();
 
     // Switch to transcript view to show result
@@ -362,90 +348,6 @@ resetKeyBtn.addEventListener('click', () => {
 });
 
 closeSettingsBtn.addEventListener('click', () => settingsDialog.close());
-
-// Export all transcripts functionality
-exportAllBtn.addEventListener('click', async () => {
-  const projects = await getAllProjects();
-  if (projects.length === 0) {
-    alert('No transcripts found to export.');
-    return;
-  }
-
-  let allText = '';
-  projects.forEach((project, projectIndex) => {
-    allText += `=== ${project.title || `Project ${projectIndex + 1}`} ===\n`;
-    allText += `Created: ${new Date(project.createdAt).toLocaleDateString()}\n\n`;
-
-    project.pages.forEach((page, pageIndex) => {
-      if (page.transcript && page.transcript.trim()) {
-        allText += `--- Page ${pageIndex + 1} ---\n`;
-        allText += `${page.transcript.trim()}\n\n`;
-      }
-    });
-    allText += '\n';
-  });
-
-  if (allText.trim() === '') {
-    alert('No transcripts found to export.');
-    return;
-  }
-
-  const blob = new Blob([allText], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = `journal-transcripts-${new Date().toISOString().split('T')[0]}.txt`;
-  a.click();
-  URL.revokeObjectURL(url);
-
-  alert(`Exported ${projects.length} project(s) to journal-transcripts-${new Date().toISOString().split('T')[0]}.txt`);
-});
-
-// Export database for migration
-exportDbBtn.addEventListener('click', async () => {
-  showStatus('Exporting database...');
-  try {
-    const json = await exportDb();
-    const blob = new Blob([json], { type: 'application/json' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `tmj-backup-${new Date().toISOString().split('T')[0]}.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  } catch (err) {
-    console.error('Export failed:', err);
-    alert('Database export failed. Please try again.');
-  }
-  hideStatus();
-});
-
-// Import database from a backup file
-importDbBtn.addEventListener('click', () => importDbInput.click());
-
-importDbInput.addEventListener('change', async (e) => {
-  const file = e.target.files[0];
-  if (!file) return;
-  importDbInput.value = ''; // reset so the same file can be re-selected if needed
-
-  const confirmed = confirm(
-    'Importing will REPLACE all existing projects in this browser with the contents of the backup file. This cannot be undone. Continue?'
-  );
-  if (!confirmed) return;
-
-  showStatus('Importing database...');
-  try {
-    const text = await file.text();
-    const count = await importDb(text);
-    hideStatus();
-    settingsDialog.close();
-    alert(`Import complete. ${count} project(s) restored. Reload the page to see them.`);
-  } catch (err) {
-    console.error('Import failed:', err);
-    hideStatus();
-    alert('Import failed. Make sure the file is a valid TMJ backup (.json).');
-  }
-});
 
 // Upload & drag-drop
 uploadBtn.addEventListener('click', () => fileInput.click());
@@ -539,14 +441,11 @@ exportBtn.addEventListener('click', () => {
   exportTxt(state.project.pages);
 });
 
-// Transcript area updates (make it editable) — debounced to avoid hammering IndexedDB
-let saveDebounceTimer = null;
+// Transcript area updates (make it editable)
 transcriptArea.addEventListener('input', () => {
   if (!state.project) return;
   const page = state.project.pages[state.currentPageIndex];
   page.transcript = transcriptArea.value;
-  clearTimeout(saveDebounceTimer);
-  saveDebounceTimer = setTimeout(() => saveProject(state.project), 500);
 });
 
 // Batch transcription
@@ -596,11 +495,6 @@ batchTranscribeBtn.addEventListener('click', async () => {
         transcriptArea.value = text;
       }
 
-      // Save progress periodically
-      if (completed % 5 === 0) {
-        await saveProject(state.project);
-      }
-
       // Small delay to prevent API rate limiting
       await new Promise(resolve => setTimeout(resolve, 1000));
 
@@ -610,9 +504,6 @@ batchTranscribeBtn.addEventListener('click', async () => {
       // Continue with other pages
     }
   }
-
-  // Final save
-  await saveProject(state.project);
 
   hideStatus();
   state.batchTranscribing = false;
@@ -652,7 +543,7 @@ improveTextBtn.addEventListener('click', async () => {
     return;
   }
 
-  const confirmed = confirm('This will use AI to improve the current section\'s text quality, grammar, and readability. Continue?');
+  const confirmed = confirm('This will use AI to clean up the current section\'s transcription errors and formatting. Continue?');
   if (!confirmed) return;
 
   improveTextBtn.disabled = true;
@@ -663,8 +554,6 @@ improveTextBtn.addEventListener('click', async () => {
     const improvedText = await improveText(currentPage.transcript, apiKey, model, prompt);
     currentPage.transcript = improvedText;
     transcriptArea.value = improvedText;
-
-    await saveProject(state.project);
 
     hideStatus();
     alert('Section improvement complete!');
@@ -694,7 +583,7 @@ improveAllTextBtn.addEventListener('click', async () => {
     return;
   }
 
-  const confirmed = confirm(`This will improve all ${sectionsToImprove.length} sections of the document. This may take several minutes and will use ${sectionsToImprove.length} API calls. Continue?`);
+  const confirmed = confirm(`This will clean up all ${sectionsToImprove.length} sections of the document. This may take several minutes and will use ${sectionsToImprove.length} API calls. Continue?`);
   if (!confirmed) return;
 
   improveAllTextBtn.disabled = true;
@@ -708,7 +597,6 @@ improveAllTextBtn.addEventListener('click', async () => {
     showStatus(`Improving section ${completed + 1} of ${sectionsToImprove.length}...`);
 
     try {
-      // Switch to this section to show progress
       if (state.currentPageIndex !== i) {
         showPage(i);
       }
@@ -717,14 +605,8 @@ improveAllTextBtn.addEventListener('click', async () => {
       page.transcript = improvedText;
       completed++;
 
-      // Update transcript area if this is the current section
       if (state.currentPageIndex === i) {
         transcriptArea.value = improvedText;
-      }
-
-      // Save progress periodically
-      if (completed % 3 === 0) {
-        await saveProject(state.project);
       }
 
       // Small delay to prevent API rate limiting
@@ -736,9 +618,6 @@ improveAllTextBtn.addEventListener('click', async () => {
     }
   }
 
-  // Final save
-  await saveProject(state.project);
-
   hideStatus();
   improveAllTextBtn.disabled = false;
   improveAllTextBtn.textContent = 'Improve Entire Document';
@@ -747,30 +626,33 @@ improveAllTextBtn.addEventListener('click', async () => {
 });
 
 async function improveText(text, apiKey, model = 'gpt-4o-mini', customPrompt = null) {
-  const defaultPrompt = `Please improve this text by:
-1. Fixing spelling errors and typos
-2. Correcting grammar and punctuation
-3. Improving readability while preserving the original meaning
-4. Maintaining the author's voice and style
-5. Preserving paragraph breaks and structure
+  const defaultSystemPrompt = `You are an expert editor who cleans up badly transcribed or OCR'd handwritten journal entries.
 
-Please return only the improved text, nothing else.
+The text you receive may contain these transcription errors:
+- Artificial line breaks in the middle of sentences (join them into natural flowing sentences)
+- Stray symbols like '#', '*', '/' inserted where letters or words should be (e.g. "#apped" → "napped", "#a/so" → "also")
+- Words split across line breaks, sometimes with a hyphen (e.g. "meme-ab re" → "memorable", "memo-ra ble" → "memorable")
+- Words run together at line boundaries (e.g. "speakor" → "speak or", "theword" → "the word")
+- Letters visually confused (e.g. "feet" → "feel", "tract" → "track", "hes" → "this")
+- Missing spaces, inconsistent capitalization, missing punctuation
 
-Text to improve:
-${text}`;
-
-  const userPrompt = customPrompt ? `${customPrompt}\n\nText to improve:\n${text}` : defaultPrompt;
+Your task:
+1. Use context clues to reconstruct what the author actually wrote
+2. Fix punctuation and capitalization
+3. Add natural paragraph breaks for readability
+4. Preserve the author's exact voice, style, word choices, and sentence structure — do not rephrase or improve the prose itself
+5. Return only the corrected text, nothing else`;
 
   const payload = {
     model,
     messages: [
       {
         role: 'system',
-        content: customPrompt || 'You are a helpful assistant that improves text quality while preserving the original meaning and style.',
+        content: customPrompt || defaultSystemPrompt,
       },
       {
         role: 'user',
-        content: userPrompt,
+        content: `Clean up this badly transcribed journal text:\n\n${text}`,
       },
     ],
   };
@@ -796,8 +678,7 @@ ${text}`;
   }
 
   const json = await res.json();
-  const improvedText = json.choices?.[0]?.message?.content?.trim() || text;
-  return improvedText;
+  return json.choices?.[0]?.message?.content?.trim() || text;
 }
 
 // Remove readonly from transcript area
