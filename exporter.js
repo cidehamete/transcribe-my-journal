@@ -1,43 +1,39 @@
 // exporter.js
 
+function downloadText(text, filename) {
+  const blob = new Blob([text], { type: 'text/plain' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
 export function exportTxt(pages) {
   const isTextOnly = pages.every(p => !p.image);
   const sourceFiles = [...new Set(pages.filter(p => p.sourceFile).map(p => p.sourceFile))];
   const multipleFiles = sourceFiles.length > 1;
 
-  let text;
+  if (isTextOnly && multipleFiles) {
+    // One download per source file, preserving original filenames
+    sourceFiles.forEach((filename) => {
+      const filePages = pages.filter(p => p.sourceFile === filename);
+      const text = filePages.map(p => p.transcript || '').filter(Boolean).join('\n\n');
+      downloadText(text, filename);
+    });
 
-  if (isTextOnly) {
-    // Text mode: clean output, no page numbers
-    if (multipleFiles) {
-      // Multiple source files: add a separator between each file
-      const parts = [];
-      let currentFile = null;
-      pages.forEach((p) => {
-        if (p.sourceFile && p.sourceFile !== currentFile) {
-          currentFile = p.sourceFile;
-          if (parts.length > 0) parts.push('\n\n');
-          parts.push(`=== ${currentFile} ===\n\n`);
-        }
-        if (p.transcript) parts.push(p.transcript);
-      });
-      text = parts.join('');
-    } else {
-      // Single file: just concatenate sections with a blank line between
-      text = pages.map(p => p.transcript || '').filter(Boolean).join('\n\n');
-    }
+  } else if (isTextOnly) {
+    // Single text file: clean concatenation, no page numbers
+    const text = pages.map(p => p.transcript || '').filter(Boolean).join('\n\n');
+    const filename = pages[0]?.sourceFile || 'transcript.txt';
+    downloadText(text, filename);
+
   } else {
-    // Scan/image mode: include page numbers
-    text = pages
+    // Scan/image mode: include page numbers in one combined file
+    const text = pages
       .map((p, idx) => `Page ${idx + 1}\n\n${p.transcript || ''}\n`)
       .join('\n');
+    downloadText(text, 'transcript.txt');
   }
-
-  const blob = new Blob([text], { type: 'text/plain' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = multipleFiles ? 'transcripts.txt' : 'transcript.txt';
-  a.click();
-  URL.revokeObjectURL(url);
 }
