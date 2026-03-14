@@ -5,6 +5,8 @@ import { exportTxt } from './exporter.js';
 
 const fileInput = document.getElementById('fileInput');
 const uploadBtn = document.getElementById('uploadBtn');
+const scanInput = document.getElementById('scanInput');
+const scanBtn = document.getElementById('scanBtn');
 const pasteTextBtn = document.getElementById('pasteTextBtn');
 const dropOverlay = document.getElementById('dropOverlay');
 const pageCanvas = document.getElementById('pageCanvas');
@@ -72,7 +74,13 @@ function updatePageNavigation() {
   }
 
   pageNavigation.classList.remove('hidden');
-  pageIndicator.textContent = `Page ${state.currentPageIndex + 1} of ${state.project.pages.length}`;
+  const label = state.isTextOnly ? 'Section' : 'Page';
+  let indicator = `${label} ${state.currentPageIndex + 1} of ${state.project.pages.length}`;
+  const page = state.project.pages[state.currentPageIndex];
+  if (page && page.sourceFile && state.project.fileCount > 1) {
+    indicator += ` — ${page.sourceFile}`;
+  }
+  pageIndicator.textContent = indicator;
   prevPageBtn.disabled = state.currentPageIndex === 0;
   nextPageBtn.disabled = state.currentPageIndex === state.project.pages.length - 1;
 }
@@ -168,61 +176,81 @@ async function handlePastedText(text) {
 
 async function handleFiles(files) {
   exportBtn.disabled = true;
-  const file = files[0];
-  if (!file) return;
+  if (!files || files.length === 0) return;
 
-  showStatus('Loading file...');
+  showStatus(files.length > 1 ? `Loading ${files.length} files...` : 'Loading file...');
 
-  let pagesData = [];
-  state.isTextOnly = false;
+  let allPages = [];
+  let hasImages = false;
 
-  try {
-    if (file.type === 'text/plain') {
-      // Handle text files
-      const text = await file.text();
-      const pages = splitTextIntoPages(text);
-      pagesData = pages.map((pageText) => ({
-        image: null,
-        transcript: pageText,
-        status: 'done',
-        originalText: pageText,
-      }));
-      state.isTextOnly = true;
-
-    } else if (file.type === 'application/pdf') {
-      try {
-        const images = await loadPdfAsImages(file);
-        pagesData = images.map((img) => ({ image: img, transcript: '', status: 'pending' }));
-      } catch (pdfError) {
-        hideStatus();
-        console.error('PDF loading error:', pdfError);
-        alert('Error loading PDF. Please try uploading an image or text file instead.');
-        return;
-      }
-    } else if (file.type.startsWith('image/')) {
-      const imgUrl = URL.createObjectURL(file);
-      const img = await loadImage(imgUrl);
-      pagesData = [{ image: img, transcript: '', status: 'pending' }];
-    } else {
-      hideStatus();
-      alert('Unsupported file type. Please upload a PDF, image (JPG, PNG), or text file (.txt).');
-      return;
+  for (let i = 0; i < files.length; i++) {
+    const file = files[i];
+    if (files.length > 1) {
+      showStatus(`Loading file ${i + 1} of ${files.length}: ${file.name}`);
     }
 
-    state.project = {
-      title: file.name,
-      pages: pagesData,
-    };
+    try {
+      if (file.type === 'text/plain') {
+        const text = await file.text();
+        const pages = splitTextIntoPages(text);
+        const textPages = pages.map((pageText) => ({
+          image: null,
+          transcript: pageText,
+          status: 'done',
+          originalText: pageText,
+          sourceFile: file.name,
+        }));
+        allPages = allPages.concat(textPages);
 
-    hideStatus();
-    updateUIForFileType();
-    showPage(0);
-    exportBtn.disabled = false;
-  } catch (error) {
-    hideStatus();
-    console.error('Error loading file:', error);
-    alert('Error loading file. Please try again or use a different file format.');
+      } else if (file.type === 'application/pdf') {
+        try {
+          const images = await loadPdfAsImages(file);
+          const pdfPages = images.map((img) => ({
+            image: img,
+            transcript: '',
+            status: 'pending',
+            sourceFile: file.name,
+          }));
+          allPages = allPages.concat(pdfPages);
+          hasImages = true;
+        } catch (pdfError) {
+          console.error(`PDF loading error for ${file.name}:`, pdfError);
+          alert(`Error loading PDF: ${file.name}. Skipping.`);
+        }
+
+      } else if (file.type.startsWith('image/')) {
+        const imgUrl = URL.createObjectURL(file);
+        const img = await loadImage(imgUrl);
+        allPages.push({ image: img, transcript: '', status: 'pending', sourceFile: file.name });
+        hasImages = true;
+
+      } else {
+        alert(`Unsupported file type: ${file.name}. Skipping.`);
+      }
+    } catch (error) {
+      console.error(`Error loading ${file.name}:`, error);
+      alert(`Error loading ${file.name}. Skipping.`);
+    }
   }
+
+  if (allPages.length === 0) {
+    hideStatus();
+    alert('No pages could be loaded from the selected files.');
+    return;
+  }
+
+  state.isTextOnly = !hasImages;
+  state.project = {
+    title: files.length === 1 ? files[0].name : `${files.length} files`,
+    pages: allPages,
+    fileCount: files.length,
+  };
+
+  state.currentPageIndex = 0;
+  hideStatus();
+  updateUIForFileType();
+  showPage(0);
+  exportBtn.disabled = false;
 }
 
 function splitTextIntoPages(text, wordsPerPage = 500) {
@@ -245,10 +273,6 @@ function updateUIForFileType() {
     improveTextBtn.classList.remove('hidden');
     improveAllTextBtn.classList.remove('hidden');
 
-    // Update page indicator text
-    if (state.project.pages.length > 1) {
-      pageIndicator.textContent = `Section ${state.currentPageIndex + 1} of ${state.project.pages.length}`;
-    }
   } else {
     // Show image-related controls, hide text improvement
     batchTranscribeBtn.classList.remove('hidden');
@@ -352,6 +376,8 @@ closeSettingsBtn.addEventListener('click', () => settingsDialog.close());
 // Upload & drag-drop
 uploadBtn.addEventListener('click', () => fileInput.click());
 fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+scanBtn.addEventListener('click', () => scanInput.click());
+scanInput.addEventListener('change', (e) => handleFiles(e.target.files));
 
 // Paste text functionality
 pasteTextBtn.addEventListener('click', () => {
