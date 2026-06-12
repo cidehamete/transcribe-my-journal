@@ -1,6 +1,7 @@
 import { loadPdfAsImages } from './pdf_renderer.js';
 import { getConfig, saveConfig, clearApiKey } from './storage.js';
 import { transcribeImage } from './mistral.js';
+import { DEFAULT_SYSTEM_PROMPT } from './prompt.js';
 import { saveProject, getAllProjects } from './db.js';
 import { exportTxt } from './exporter.js';
 
@@ -101,7 +102,7 @@ function showPage(pageIndex) {
     viewToggle.classList.remove('hidden');
     
     // Auto-transcribe if no transcript exists and user hasn't disabled auto-transcribe
-    if (!page.transcript && page.status === 'pending' && !state.autoTranscribeDisabled) {
+    if (!page.transcript && page.status === 'pending' && !state.autoTranscribeDisabled && !state.batchTranscribing) {
       transcribeCurrentPage();
     }
   }
@@ -181,8 +182,18 @@ async function handlePastedText(text) {
 
 async function handleFiles(files) {
   exportBtn.disabled = true;
-  const file = files[0];
-  if (!file) return;
+  const fileList = Array.from(files || []);
+  if (fileList.length === 0) return;
+
+  // Multiple images selected: load them all as pages of one project,
+  // sorted by filename so IMG_0001..IMG_0300 stay in capture order.
+  const imageFiles = fileList.filter((f) => f.type.startsWith('image/'));
+  if (imageFiles.length > 1) {
+    await handleMultipleImages(imageFiles);
+    return;
+  }
+
+  const file = fileList[0];
 
   showStatus('Loading file...');
 
@@ -251,6 +262,50 @@ async function handleFiles(files) {
   }
 }
 
+async function handleMultipleImages(imageFiles) {
+  // Natural sort by filename (IMG_2.jpg before IMG_10.jpg)
+  const sorted = imageFiles.slice().sort((a, b) =>
+    a.name.localeCompare(b.name, undefined, { numeric: true, sensitivity: 'base' })
+  );
+
+  state.isTextOnly = false;
+  const pagesData = [];
+
+  try {
+    for (let i = 0; i < sorted.length; i++) {
+      showStatus(`Loading image ${i + 1} of ${sorted.length}…`);
+      const imgUrl = URL.createObjectURL(sorted[i]);
+      const img = await loadImage(imgUrl);
+      pagesData.push({ image: img, transcript: '', status: 'pending' });
+    }
+
+    state.project = {
+      title: `${sorted[0].name} – ${sorted[sorted.length - 1].name} (${sorted.length} pages)`,
+      createdAt: Date.now(),
+      pages: pagesData,
+    };
+
+    const storableProject = {
+      ...state.project,
+      pages: state.project.pages.map((p) => ({
+        imageSrc: p.image ? p.image.src : null,
+        transcript: p.transcript,
+        status: p.status,
+      })),
+    };
+    await saveProject(storableProject);
+
+    hideStatus();
+    updateUIForFileType();
+    showPage(0);
+    exportBtn.disabled = false;
+  } catch (error) {
+    hideStatus();
+    console.error('Error loading images:', error);
+    alert(`Error loading images (failed around image ${pagesData.length + 1}). Try a smaller batch.`);
+  }
+}
+
 function splitTextIntoPages(text, wordsPerPage = 500) {
   const words = text.split(/\s+/);
   const pages = [];
@@ -313,6 +368,16 @@ async function getOptimizedImageData(canvas, compressImages = true) {
   });
 }
 
+
+// Last N words of the previous page's transcript, used as continuity context
+// (journal entries flow mid-sentence across pages).
+function getPrevPageTail(pageIndex, words = 60) {
+  if (!state.project || pageIndex <= 0) return '';
+  const prev = state.project.pages[pageIndex - 1];
+  if (!prev || !prev.transcript) return '';
+  return prev.transcript.trim().split(/\s+/).slice(-words).join(' ');
+}
+
 async function transcribeCurrentPage() {
   const config = await getConfig();
   if (!config.apiKey) {
@@ -326,7 +391,8 @@ async function transcribeCurrentPage() {
 
   try {
     const dataUrl = await getOptimizedImageData(pageCanvas, config.compressImages);
-    const text = await transcribeImage(dataUrl, config.apiKey, config.model, config.prompt, config.maxTokens);
+    const prevTail = getPrevPageTail(state.currentPageIndex);
+    const text = await transcribeImage(dataUrl, config.apiKey, config.model, config.prompt, config.maxTokens, prevTail);
     page.transcript = text;
     page.status = 'done';
     transcriptArea.value = text;
@@ -360,9 +426,9 @@ settingsBtn.addEventListener('click', async () => {
   const config = await getConfig();
   apiKeyInput.value = config.apiKey || '';
   modelInput.value = config.model || 'pixtral-large-latest';
-  promptInput.value = config.prompt || promptInput.value;
+  promptInput.value = config.prompt || DEFAULT_SYSTEM_PROMPT;
   compressImagesCheckbox.checked = config.compressImages !== false; // default true
-  maxTokensSelect.value = config.maxTokens || '1000';
+  maxTokensSelect.value = config.maxTokens || '2000';
   settingsDialog.showModal();
 });
 
@@ -385,6 +451,11 @@ resetKeyBtn.addEventListener('click', () => {
 });
 
 closeSettingsBtn.addEventListener('click', () => settingsDialog.close());
+
+const restorePromptBtn = document.getElementById('restorePromptBtn');
+restorePromptBtn.addEventListener('click', () => {
+  promptInput.value = DEFAULT_SYSTEM_PROMPT;
+});
 
 // Export all transcripts functionality
 exportAllBtn.addEventListener('click', async () => {
@@ -570,7 +641,8 @@ batchTranscribeBtn.addEventListener('click', async () => {
       
       // Generate optimized data URL for this page
       const dataUrl = await getOptimizedImageData(pageCanvas, config.compressImages);
-      const text = await transcribeImage(dataUrl, config.apiKey, config.model, config.prompt, config.maxTokens);
+      const prevTail = getPrevPageTail(i);
+      const text = await transcribeImage(dataUrl, config.apiKey, config.model, config.prompt, config.maxTokens, prevTail);
       
       page.transcript = text;
       page.status = 'done';

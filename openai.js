@@ -1,23 +1,29 @@
 // openai.js
 // Lightweight wrapper for calling the OpenAI vision model via fetch
 
-export async function transcribeImage(dataUrl, apiKey, model = 'gpt-4o-mini', prompt = '', maxTokens = 1000) {
+import { DEFAULT_SYSTEM_PROMPT } from './prompt.js';
+
+export async function transcribeImage(dataUrl, apiKey, model = 'gpt-4o-mini', prompt = '', maxTokens = 2000, prevPageTail = '') {
+  let userText = 'Transcribe the handwritten journal page in this image, following your instructions exactly. The page may begin and end mid-sentence.';
+  if (prevPageTail) {
+    userText += `\n\nFor continuity, the previous page's transcript ended with:\n"...${prevPageTail}"\n\nThis page likely continues that sentence. Do NOT repeat the previous page's text — transcribe only what is on this page.`;
+  }
+
   const payload = {
     model,
     max_tokens: parseInt(maxTokens),
+    temperature: 0.2, // low temperature = more faithful transcription
     messages: [
       {
         role: 'system',
-        content:
-          prompt ||
-          'You are an expert editor who turns handwritten journal entries into clean, well-punctuated plain text. Fix spelling errors, add punctuation, make educated guesses about wrongly transcribed words based on context, and add frequent paragraph breaks to make the text more readable. Preserve the author\'s original words and their order.',
+        content: prompt || DEFAULT_SYSTEM_PROMPT,
       },
       {
         role: 'user',
         content: [
           {
             type: 'text',
-            text: 'Please transcribe the handwritten text in this image, adding appropriate paragraph breaks and improving readability while preserving the original meaning.',
+            text: userText,
           },
           {
             type: 'image_url',
